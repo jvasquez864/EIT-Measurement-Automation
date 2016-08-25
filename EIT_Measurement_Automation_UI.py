@@ -600,6 +600,7 @@ def main():
     ex = Ui_MainWindow()
     ex.show()
     sys.exit(app.exec_())
+    print('hello')
     
 
     #print(os.path.dirname(os.path.abspath(__file__)))
