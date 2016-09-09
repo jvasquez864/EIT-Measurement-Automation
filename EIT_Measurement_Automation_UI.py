@@ -7,10 +7,14 @@
 # WARNING! All changes made in this file will be lost!
 
 from PyQt4 import QtCore, QtGui
+from scipy import interpolate
+import numpy as np
+import matplotlib as mpl
+from matplotlib import cm
+import matplotlib.pyplot as plt
 import sys
 import pyautogui
 import os
-import matlab.engine
 import time
 
 '''
@@ -124,7 +128,6 @@ class Form2(QtGui.QDialog):
 class Ui_MainWindow(QtGui.QMainWindow):
     def __init__(self):
         QtGui.QWidget.__init__(self)
-        self.matlab = matlab.engine.start_matlab()
         self.setupUi(self)
         
     def setupUi(self, MainWindow):
@@ -442,8 +445,8 @@ class Ui_MainWindow(QtGui.QMainWindow):
 
     def calculateCalibratedSkinImp(self):
         path = os.path.join(os.getcwd(),"Processed Calibrated Skin Impedance.txt")
-        data = self.matlab.csvread(path,0,0,('A1..C4'))
-        self.calibratedSkinImp_txt.setText(str(self.matlab.mean2(data)))
+        data = np,genfromtxt(path, delimiter = ',')
+        self.calibratedSkinImp_txt.setText( str( np.mean( data ) ) )
 
     def getDataInfo(self):
         getInfo = Form2()
@@ -458,41 +461,34 @@ class Ui_MainWindow(QtGui.QMainWindow):
             QtGui.QMessageBox.warning(self,"Warning","Must select to either generate the image for a single point array measurement or an entire phantom")
             return
         try: 
-            imgDir = str(self.generateImgDir_txt.text()).replace('\\','/')
-
-            #Range for data csv read needs to change depending on whether we're generating an image for
-            #a single point or for the entire phantom.  Possibly have the user input # of rows & columns
-            #during measurements, i.e a 3x5 measurements would result in the range being A1..L15 because
-            #array itself has 4 rows and 3 columns, so measuredRows * ArrayRows = 3*4=12, (L is twelvth
-            #letter.  However, for single point  images, it will always be A1..C4
-
-            if self.pointImage_cBox.isChecked():
-                data = self.matlab.csvread(imgDir,0,0,('A1..C4'))
-                "Note: we may not need to transpose the data anymore (based on how measurements are taken"
-                
-            else:
-                global listOfColumns
-                 
-                rows,columns = self.getDataInfo()
-                rows = rows*4
-                columns = columns*3
-               
-                
-                #getInfo.close
-            
-
-
-                #rows, ok = QtGui.QInputDialog.getText(self,'Input','Rows measured:')
-                #columns, ok = QtGui.QInputDialog.getText(self,'
-                data = self.matlab.csvread(imgDir,0,0,('A1..' + listOfColumns[columns-1] + str(rows)))
-
-            data = self.matlab.transpose(data)
+            imgDir = str(self.generateImgDir_txt.text())
+            print(imgDir)
+            print('didnt get the data')
+            data = np.genfromtxt( imgDir, delimiter = ',' )
+            data = data.transpose()
+            print('got the data')
             "Interpolate the data 5 times"
             #maybe do a few more interpolations if we're doing a single point image
-            for i in range (0,5):
-                data = self.matlab.interpn(data)
+            for i in range ( 5 ):
+                columns = len( data[ 0 ] )
+                rows = len( data )
+                columnsRange = np.linspace( 1, columns, columns )
+                rowsRange = np.linspace( 1, rows, rows )
 
-            "Plot the data"
+                interpolation = interpolate.interp2d( columnsRange, rowsRange, data, kind = 'linear' )
+                ##mimicking the new size of an interpolated data set in matlab ( n -> 2n-1 )
+                newColumnsRange = np.linspace( 1, columns, 2*columns - 1)
+                newRowsRange = np.linspace( 1, rows, 2*rows - 1)
+                data = interpolation( newColumnsRange, newRowsRange )
+                
+            impedanceStdev = np.std( data )
+            minImpedance = float( self.calibratedSkinImp_txt.text() ) - impedanceStdev
+            maxImpedance = float( self.calibratedSkinImp_txt.text() ) + impedanceStdev
+            
+            fig, ax = plt.subplots()
+            cax = ax.imshow( data, interpolation = 'nearest', cmap = cm.RdYlBu, vmin = minImpedance, vmax = maxImpedance )
+            cbar = fig.colorbar( cax )
+            plt.show()   
             
         except matlab.engine.MatlabExecutionError:
             if self.pointImage_cBox.isChecked():
@@ -507,44 +503,9 @@ class Ui_MainWindow(QtGui.QMainWindow):
             QtGui.QMessageBox.warning(self,"Warning","Invalid row or column input")
             return
             
-        try:
-            axisAttributes = matlab.double([[(float(self.calibratedSkinImp_txt.text()) - self.matlab.std2(data)), (float(self.calibratedSkinImp_txt.text())+self.matlab.std2(data))]])
-            self.matlab.imagesc(data)
-
-            ''' Call to "self.matlab.caxis" will generate a matlab execution error,
-                however, it will properly execute caxis, so just continue'''
-
-            '''Instead of using "self.matlab.mean2(data)" to set the min and max of the axis
-        '''
-            #axisAttributes = matlab.double([[(matlab.double([self.calibratedSkinImp_txt.text()]) -self.matlab.std2(data)), (matlab.double([self.calibratedSkinImp_txt.text()]) +self.matlab.std2(data))]])
-            
-            
-            self.matlab.caxis(axisAttributes)
-            
-            
-             
-        except matlab.engine.MatlabExecutionError:
-            emptyArray = matlab.single([])
-
-            ## Left off here 4-21
-            colormap = self.matlab.jet()
-            #Switching colormap so that red is low impedance and blue is high
-            for i in range(colormap.size[0]):
-                colormap[i][0] = colormap[i][2] - colormap[i][0] 
-                colormap[i][2] = colormap[i][2] - colormap[i][0]
-                colormap[i][0] = colormap[i][0] + colormap[i][2]
-                
-            self.matlab.colormap(colormap)
-            self.matlab.set(self.matlab.gca(),'XTick', emptyArray, 'YTick', emptyArray)
-            self.matlab.set(self.matlab.get(self.matlab.colorbar(),'ylabel'),'String','Impedance')
-
         except ValueError:
             QtGui.QMessageBox.warning(self,"Warning","Invalid skin calibration impedance value.")
             return
-
-        #except:
-         #   print("Some shit went wrong...")
-       # print('still here')
 
 
     def takeMeasurements(self, savedFileName):
@@ -601,8 +562,6 @@ def main():
     ex.show()
     sys.exit(app.exec_())
     
-
-    #print(os.path.dirname(os.path.abspath(__file__)))
 if __name__ == '__main__':
     main()
 
